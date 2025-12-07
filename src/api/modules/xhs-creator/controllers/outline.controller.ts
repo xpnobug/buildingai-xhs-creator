@@ -1,5 +1,6 @@
 import { Body, Post, Req, BadRequestException } from "@nestjs/common";
-import { OutlineService, XhsBillingService } from "../services";
+import { OutlineService } from "../services";
+import { BillingService } from "../services/billing.service";
 import { CreateOutlineDto } from "../dto";
 import { InjectRepository } from "@buildingai/db/@nestjs/typeorm";
 import { Repository } from "@buildingai/db/typeorm";
@@ -16,7 +17,7 @@ export class OutlineController {
         private readonly outlineService: OutlineService,
         @InjectRepository(XhsTask)
         private taskRepository: Repository<XhsTask>,
-        private readonly xhsBillingService: XhsBillingService,
+        private readonly billingService: BillingService,
     ) {}
 
     /**
@@ -33,8 +34,8 @@ export class OutlineController {
         }
 
         // 获取积分配置，检查是否有免费次数或足够积分
-        const config = await this.xhsBillingService.getPowerConfig();
-        const hasSufficientBalance = await this.xhsBillingService.hasSufficientBalance(
+        const config = await this.billingService.getPowerConfig();
+        const hasSufficientBalance = await this.billingService.hasSufficientBalance(
             userId,
             config.outlinePower,
         );
@@ -43,7 +44,7 @@ export class OutlineController {
         }
 
         // 消费（优先使用免费次数，否则扣积分）
-        const billing = await this.xhsBillingService.consume(userId, "outline");
+        const billing = await this.billingService.consume(userId, "outline");
 
         // 创建任务记录
         const task = this.taskRepository.create({
@@ -83,7 +84,7 @@ export class OutlineController {
         } catch (error) {
             // 生成失败，回退积分（如果已扣）
             if (!billing.isFree && billing.powerDeducted > 0) {
-                await this.xhsBillingService.rollbackPower(
+                await this.billingService.rollbackPower(
                     userId,
                     billing.powerDeducted,
                     "outline",

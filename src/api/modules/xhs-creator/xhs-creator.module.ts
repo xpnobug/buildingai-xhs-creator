@@ -20,12 +20,12 @@ import {
 import {
     OutlineService,
     ImageService,
+    ImagePromptService,
     XhsConfigService,
-    ImageBillingService,
     ImageVersionService,
     GeneratorResolverService,
-    XhsBillingService,
 } from "./services";
+import { BillingService } from "./services/billing.service";
 
 /**
  * 小红书图文生成模块
@@ -46,20 +46,21 @@ import {
     providers: [
         OutlineService,
         ImageService,
+        ImagePromptService,
         XhsConfigService,
-        ImageBillingService,
+        BillingService,
         ImageVersionService,
         GeneratorResolverService,
-        XhsBillingService,
     ],
     exports: [
         OutlineService,
         ImageService,
+        ImagePromptService,
         XhsConfigService,
-        ImageBillingService,
+        BillingService,
         ImageVersionService,
         GeneratorResolverService,
-        XhsBillingService,
     ],
 })
 export class XhsCreatorModule {}
+

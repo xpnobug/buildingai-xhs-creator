@@ -2,6 +2,7 @@ import { ExtensionEntity } from "@buildingai/core/decorators";
 import {
     Column,
     CreateDateColumn,
+    Index,
     JoinColumn,
     ManyToOne,
     PrimaryGeneratedColumn,
@@ -21,6 +22,7 @@ export enum ImageStatus {
  * 小红书图片实体
  */
 @ExtensionEntity({ name: "xhs_creator_images", comment: "小红书图文生成图片" })
+@Index("idx_xhs_image_task_page", ["taskId", "pageIndex"])  // 复合索引：按任务ID+页面索引查询
 export class XhsImage {
     @PrimaryGeneratedColumn("uuid")
     id: string;

@@ -180,6 +180,20 @@ export class XhsCreatorInitialSeeder extends BaseSeeder {
             );
             this.logSuccess("创建版本历史表索引成功");
 
+            // 创建 xhs_creator_images 复合索引（优化按任务ID+页面索引查询）
+            await queryRunner.query(
+                `CREATE INDEX IF NOT EXISTS "idx_xhs_image_task_page" 
+                ON "buildingai_xhs_creator"."xhs_creator_images"("task_id", "page_index")`,
+            );
+            this.logSuccess("创建 xhs_creator_images 复合索引成功");
+
+            // 创建 xhs_creator_tasks 复合索引（优化按用户ID+状态查询）
+            await queryRunner.query(
+                `CREATE INDEX IF NOT EXISTS "idx_xhs_task_user_status" 
+                ON "buildingai_xhs_creator"."xhs_creator_tasks"("user_id", "status")`,
+            );
+            this.logSuccess("创建 xhs_creator_tasks 复合索引成功");
+
             // 创建 xhs_config 表
             await queryRunner.query(
                 `CREATE TABLE IF NOT EXISTS "buildingai_xhs_creator"."xhs_config" (

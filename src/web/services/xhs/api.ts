@@ -41,6 +41,27 @@ const getPluginWebBaseUrl = () => {
 const buildWebApiUrl = (path: string) => `${getPluginWebBaseUrl()}${path}`;
 
 /**
+ * 用户余额与使用统计 API
+ */
+export const balanceApi = {
+    /**
+     * 获取用户使用统计（免费次数、余额等）
+     */
+    async getUserUsage() {
+        return await usePluginWebGet<{
+            success: boolean;
+            data?: {
+                freeUsageCount: number;
+                freeUsageLimit: number;
+                remainingFreeCount: number;
+                userPower: number;
+            };
+            message?: string;
+        }>("/balance/usage");
+    },
+};
+
+/**
  * 小红书大纲生成API
  */
 export const outlineApi = {

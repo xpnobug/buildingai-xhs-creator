@@ -9,6 +9,7 @@ import OutlineStep from "~/components/xhs/OutlineStep.vue";
 import ResultStep from "~/components/xhs/ResultStep.vue";
 import type { XhsPluginConfig } from "~/models";
 import { apiGetXhsPluginConfig } from "~/services/xhs/config";
+import { balanceApi } from "~/services/xhs/api";
 import { useXhsCreatorStore } from "~/stores/xhs-creator";
 import { useUserStore } from "@buildingai/stores/user";
 
@@ -33,6 +34,12 @@ const pluginConfig = ref<XhsPluginConfig>({
     coverImagePower: 80,
     contentImagePower: 40,
 });
+
+// 免费使用次数
+const freeUsageInfo = ref<{
+    remainingFreeCount: number;
+    freeUsageLimit: number;
+} | null>(null);
 
 const highlights = computed(() => [
     {
@@ -152,6 +159,11 @@ const handleOutlineGenerate = () => {
     activeTab.value = "generate";
 };
 
+// 大纲页直接生成完成后，切换到结果页
+const handleOutlineCompleted = () => {
+    activeTab.value = "result";
+};
+
 const handleGenerationBack = () => {
     activeTab.value = "outline";
 };
@@ -167,10 +179,20 @@ const handleResultRestart = () => {
 
 onMounted(async () => {
     try {
-        const config = await apiGetXhsPluginConfig();
+        const [config, usageResult] = await Promise.all([
+            apiGetXhsPluginConfig(),
+            balanceApi.getUserUsage(),
+        ]);
         pluginConfig.value = config;
+        
+        if (usageResult.success && usageResult.data) {
+            freeUsageInfo.value = {
+                remainingFreeCount: usageResult.data.remainingFreeCount,
+                freeUsageLimit: usageResult.data.freeUsageLimit,
+            };
+        }
     } catch (error) {
-        console.error("获取计费配置失败:", error);
+        console.error("获取配置失败:", error);
     }
 });
 
@@ -297,7 +319,7 @@ const handleInspirationClick = (t: string) => {
 
                                 <UAlert
                                     icon="i-lucide-info"
-                                    :description="`封面图 ${pluginConfig.coverImagePower} 积分/张 · 内容图 ${pluginConfig.contentImagePower} 积分/张 · 当前余额：${userPower} 积分`"
+                                    :description="`封面图 ${pluginConfig.coverImagePower} 积分/张 · 内容图 ${pluginConfig.contentImagePower} 积分/张 · 当前余额：${userPower} 积分` + (freeUsageInfo ? ` · 免费次数：${freeUsageInfo.remainingFreeCount}/${freeUsageInfo.freeUsageLimit}` : '')"
                                     title="计费标准"
                                 />
                             </div>
@@ -329,6 +351,7 @@ const handleInspirationClick = (t: string) => {
                         key="outline"
                         @back="handleOutlineBack"
                         @start-generate="handleOutlineGenerate"
+                        @completed="handleOutlineCompleted"
                     />
 
                     <GenerateStep

@@ -1,6 +1,4 @@
 import { Injectable, Logger, MessageEvent } from "@nestjs/common";
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
 import { InjectRepository } from "@buildingai/db/@nestjs/typeorm";
 import { Repository } from "@buildingai/db/typeorm";
 import { Observable, Subject } from "rxjs";
@@ -10,27 +8,19 @@ import { XhsImage, ImageStatus } from "../../../db/entities/xhs-image.entity";
 import { XhsImageHistory } from "../../../db/entities/xhs-image-history.entity";
 import { BaseGenerator } from "../generators";
 import { XhsConfigService } from "./xhs-config.service";
-import { ImageBillingService } from "./image-billing.service";
+import { BillingService } from "./billing.service";
 import { ImageVersionService } from "./image-version.service";
 import { GeneratorResolverService } from "./generator-resolver.service";
+import { ImagePromptService } from "./image-prompt.service";
 
 /**
  * 图片生成服务
  * 负责批量生成图片，使用SSE流式返回进度
+ * 优化：Prompt 逻辑已委托给 ImagePromptService
  */
 @Injectable()
 export class ImageService {
     private readonly logger = new Logger(ImageService.name);
-
-    /**
-     * 图片生成 Prompt 模板（完整版），从 prompts/image_prompt.txt 加载
-     */
-    private imagePromptTemplate: string;
-
-    /**
-     * 图片生成 Prompt 模板（短版），从 prompts/image_prompt_short.txt 加载
-     */
-    private imagePromptTemplateShort?: string;
 
     constructor(
         @InjectRepository(XhsTask)
@@ -40,44 +30,13 @@ export class ImageService {
         @InjectRepository(XhsImageHistory)
         private imageHistoryRepository: Repository<XhsImageHistory>,
         private readonly configService: XhsConfigService,
-        private readonly billingService: ImageBillingService,
+        private readonly billingService: BillingService,
         private readonly versionService: ImageVersionService,
         private readonly generatorResolver: GeneratorResolverService,
-    ) {
-        const { full, short } = this.loadImagePromptTemplates();
-        this.imagePromptTemplate = full;
-        this.imagePromptTemplateShort = short;
-    }
+        private readonly promptService: ImagePromptService,
+    ) {}
 
-    /**
-     * 加载图片 Prompt 模板文件
-     */
-    private loadImagePromptTemplates(): { full: string; short?: string } {
-        const baseDir = join(__dirname, "..", "prompts");
 
-        const fullPath = join(baseDir, "image_prompt.txt");
-        const shortPath = join(baseDir, "image_prompt_short.txt");
-
-        let full = "";
-        let short: string | undefined;
-
-        try {
-            full = readFileSync(fullPath, "utf-8");
-        } catch (error) {
-            console.error("[ImageService] 读取 image_prompt.txt 失败:", error);
-            full = "生成小红书风格图片，页面类型：{page_type}，内容：{page_content}";
-        }
-
-        if (existsSync(shortPath)) {
-            try {
-                short = readFileSync(shortPath, "utf-8");
-            } catch (error) {
-                console.error("[ImageService] 读取 image_prompt_short.txt 失败:", error);
-            }
-        }
-
-        return { full, short };
-    }
 
     /**
      * 批量生成图片（SSE流式返回）
@@ -296,6 +255,7 @@ export class ImageService {
 
     /**
      * 高并发模式生成内容页
+     * 优化：使用并发限制器，最多同时 3 个请求，防止 AI 服务过载
      */
     private async executeHighConcurrencyGeneration(
         taskId: string,
@@ -307,7 +267,10 @@ export class ImageService {
         subject: Subject<MessageEvent>,
         isRegenerate?: boolean,
     ): Promise<void> {
-        console.log(`[XHS Creator] 启用高并发模式，并行生成 ${contentPages.length} 页内容`);
+        // 并发限制：最多同时生成 3 张图片
+        const MAX_CONCURRENCY = 3;
+        
+        this.logger.log(`[XHS Creator] 启用高并发模式，限制并发数: ${MAX_CONCURRENCY}`);
 
         subject.next({
             data: JSON.stringify({
@@ -315,15 +278,21 @@ export class ImageService {
                 stage: "content",
                 current: 0,
                 total: contentPages.length,
-                message: `开始并发生成 ${contentPages.length} 页内容...`,
+                message: `开始并发生成 ${contentPages.length} 页内容（并发限制: ${MAX_CONCURRENCY}）...`,
             }),
         } as MessageEvent);
 
         let completedCount = 0;
+        let successCount = 0;
 
-        const results = await Promise.allSettled(
-            contentPages.map((page, idx) =>
-                this.generateSingleImage(
+        // 使用简单的并发限制器
+        const results: Array<{ page: typeof contentPages[0]; imageUrl?: string; error?: Error }> = [];
+        const queue = [...contentPages.entries()];
+        const executing = new Set<Promise<void>>();
+
+        const runTask = async (idx: number, page: typeof contentPages[0]) => {
+            try {
+                const imageUrl = await this.generateSingleImage(
                     task,
                     page,
                     generator,
@@ -331,52 +300,23 @@ export class ImageService {
                     fullOutline,
                     undefined,
                     isRegenerate,
-                )
-                    .then((imageUrl) => {
-                        completedCount++;
-                        console.log(`[XHS Creator] 第${idx + 1}页生成成功: ${imageUrl}`);
+                );
 
-                        // 实时发送进度
-                        subject.next({
-                            data: JSON.stringify({
-                                type: "progress",
-                                stage: "content",
-                                current: completedCount,
-                                total: contentPages.length,
-                                message: `正在生成第${idx + 1}页...`,
-                            }),
-                        } as MessageEvent);
-
-                        return { page, imageUrl };
-                    })
-                    .catch((error) => {
-                        completedCount++;
-                        console.error(`[XHS Creator] 第${idx + 1}页生成失败:`, error);
-
-                        subject.next({
-                            data: JSON.stringify({
-                                type: "progress",
-                                stage: "content",
-                                current: completedCount,
-                                total: contentPages.length,
-                                message: `第${idx + 1}页生成失败`,
-                            }),
-                        } as MessageEvent);
-
-                        // 包装错误，携带 page 信息
-                        throw { page, error };
-                    }),
-            ),
-        );
-
-        console.log(`[XHS Creator] 高并发生成完成，处理结果...`);
-
-        // 批量更新任务的生成页数
-        let successCount = 0;
-        for (const result of results) {
-            if (result.status === "fulfilled") {
+                completedCount++;
                 successCount++;
-                const { page, imageUrl } = result.value;
+                results.push({ page, imageUrl });
+
+                this.logger.debug(`第${idx + 1}页生成成功`);
+
+                subject.next({
+                    data: JSON.stringify({
+                        type: "progress",
+                        stage: "content",
+                        current: completedCount,
+                        total: contentPages.length,
+                        message: `正在生成第${idx + 1}页...`,
+                    }),
+                } as MessageEvent);
 
                 subject.next({
                     data: JSON.stringify({
@@ -385,29 +325,51 @@ export class ImageService {
                         imageUrl,
                     }),
                 } as MessageEvent);
-            } else {
-                const reasonObj = result.reason as { page?: { index: number }; error?: Error };
-                const pageIndex = reasonObj?.page?.index ?? -1;
-                const errorMessage = reasonObj?.error?.message || String(result.reason);
+            } catch (error) {
+                completedCount++;
+                results.push({ page, error: error as Error });
 
-                console.error(`[XHS Creator] 页面 ${pageIndex} 生成失败，原因:`, errorMessage);
+                this.logger.error(`第${idx + 1}页生成失败:`, error);
+
                 subject.next({
                     data: JSON.stringify({
                         type: "error",
-                        pageIndex,
-                        message: errorMessage,
+                        pageIndex: page.index,
+                        message: (error as Error).message,
                     }),
                 } as MessageEvent);
             }
+        };
+
+        // 并发控制循环
+        while (queue.length > 0 || executing.size > 0) {
+            // 填充执行队列到最大并发数
+            while (queue.length > 0 && executing.size < MAX_CONCURRENCY) {
+                const [idx, page] = queue.shift()!;
+                const promise = runTask(idx, page).finally(() => {
+                    executing.delete(promise);
+                });
+                executing.add(promise);
+            }
+
+            // 等待任意一个任务完成
+            if (executing.size > 0) {
+                await Promise.race(executing);
+            }
         }
 
-        // 批量更新任务生成页数（优化：减少数据库交互）
-        task.generatedPages += successCount;
-        await this.taskRepository.save(task);
+        this.logger.log(`[XHS Creator] 高并发生成完成，成功: ${successCount}/${contentPages.length}`);
+
+        // 批量更新任务生成页数
+        if (successCount > 0) {
+            task.generatedPages += successCount;
+            await this.taskRepository.save(task);
+        }
     }
 
     /**
      * 顺序模式生成内容页
+     * 优化：循环结束后批量更新任务进度，减少数据库写入次数
      */
     private async executeSequentialGeneration(
         taskId: string,
@@ -419,6 +381,9 @@ export class ImageService {
         subject: Subject<MessageEvent>,
         isRegenerate?: boolean,
     ): Promise<void> {
+        // 本地计数器，避免每次循环都写数据库
+        let successCount = 0;
+
         for (let i = 0; i < contentPages.length; i++) {
             const page = contentPages[i];
 
@@ -443,8 +408,8 @@ export class ImageService {
                     isRegenerate,
                 );
 
-                task.generatedPages++;
-                await this.taskRepository.save(task);
+                // 本地累计成功数，不再每次保存
+                successCount++;
 
                 subject.next({
                     data: JSON.stringify({
@@ -462,6 +427,12 @@ export class ImageService {
                     }),
                 } as MessageEvent);
             }
+        }
+
+        // 循环结束后一次性更新任务进度（减少 N-1 次数据库写入）
+        if (successCount > 0) {
+            task.generatedPages += successCount;
+            await this.taskRepository.save(task);
         }
     }
 
@@ -548,6 +519,7 @@ export class ImageService {
 
     /**
      * 构建图片生成的完整提示词
+     * 委托给 ImagePromptService
      */
     private buildImagePrompt(
         pageContent: string,
@@ -555,27 +527,15 @@ export class ImageService {
         fullOutline?: string,
         userTopic?: string,
     ): string {
-        const typeLabel =
-            pageType === "cover" ? "封面" : pageType === "summary" ? "总结" : "内容";
-
-        const safeOutline = (fullOutline || "").slice(0, 1500);
-        const safeTopic = userTopic || "未提供";
-
-        const template = this.imagePromptTemplate || "生成小红书风格图片：{page_type} - {page_content}";
-
-        return template
-            .replace("{page_content}", pageContent)
-            .replace("{page_type}", typeLabel)
-            .replace("{full_outline}", safeOutline)
-            .replace("{user_topic}", safeTopic);
+        return this.promptService.buildImagePrompt(pageContent, pageType, fullOutline, userTopic);
     }
 
     /**
      * 从页面内容中提取简短图片提示词（仅用于保存到数据库的 prompt 字段）
+     * 委托给 ImagePromptService
      */
     private extractImagePrompt(content: string): string {
-        const match = content.match(/图片描述[：:]\s*(.+?)(?:\n|$)/);
-        return match ? match[1].trim() : content;
+        return this.promptService.extractImagePrompt(content);
     }
 
     /**

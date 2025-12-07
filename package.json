@@ -53,6 +53,7 @@
         "@buildingai/pipe": "workspace:*",
         "@buildingai/dto": "workspace:*",
         "@buildingai/base": "workspace:*",
+        "adm-zip": "^0.5.16",
         "axios": "^1.11.0",
         "rxjs": "^7.8.1",
         "vue-waterfall-plugin-next": "^3.0.0"

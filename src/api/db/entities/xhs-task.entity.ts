@@ -2,6 +2,7 @@ import { ExtensionEntity } from "@buildingai/core/decorators";
 import {
     Column,
     CreateDateColumn,
+    Index,
     OneToMany,
     PrimaryGeneratedColumn,
     UpdateDateColumn,
@@ -23,6 +24,7 @@ export enum TaskStatus {
  * 小红书图文生成任务实体
  */
 @ExtensionEntity({ name: "xhs_creator_tasks", comment: "小红书图文生成任务" })
+@Index("idx_xhs_task_user_status", ["userId", "status"])  // 复合索引：按用户ID+状态查询
 export class XhsTask {
     @PrimaryGeneratedColumn("uuid")
     id: string;

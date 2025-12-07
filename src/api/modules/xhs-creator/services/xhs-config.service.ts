@@ -5,16 +5,38 @@ import { Repository } from "typeorm";
 import { XhsConfig } from "../../../db/entities/xhs-config.entity";
 import { UpdateXhsConfigDto } from "../dto";
 
+/**
+ * 缓存 TTL（毫秒）
+ */
+const CONFIG_CACHE_TTL = 60 * 1000; // 60 秒
+
 @Injectable()
 export class XhsConfigService {
     protected readonly logger = new Logger(XhsConfigService.name);
+
+    /** 配置缓存 */
+    private configCache: XhsConfig | null = null;
+    /** 缓存时间戳 */
+    private cacheTimestamp = 0;
 
     constructor(
         @InjectRepository(XhsConfig)
         private readonly configRepository: Repository<XhsConfig>,
     ) {}
 
+    /**
+     * 获取配置（带缓存）
+     * 缓存 60 秒自动失效，或通过 invalidateCache() 手动失效
+     */
     async getConfig(): Promise<XhsConfig> {
+        const now = Date.now();
+
+        // 检查缓存是否有效
+        if (this.configCache && now - this.cacheTimestamp < CONFIG_CACHE_TTL) {
+            return this.configCache;
+        }
+
+        // 查询数据库
         let config = await this.configRepository.findOne({
             where: {},
             order: { createdAt: "DESC" },
@@ -42,7 +64,21 @@ export class XhsConfigService {
             this.logger.log("创建默认图文配置");
         }
 
+        // 更新缓存
+        this.configCache = config;
+        this.cacheTimestamp = now;
+        this.logger.debug("配置已缓存");
+
         return config;
+    }
+
+    /**
+     * 手动失效缓存（配置更新后调用）
+     */
+    invalidateCache(): void {
+        this.configCache = null;
+        this.cacheTimestamp = 0;
+        this.logger.debug("配置缓存已失效");
     }
 
     async updateConfig(id: string, dto: UpdateXhsConfigDto): Promise<XhsConfig> {
@@ -67,7 +103,12 @@ export class XhsConfigService {
         if (dto.outlinePower !== undefined) config.outlinePower = dto.outlinePower;
         if (dto.freeUsageLimit !== undefined) config.freeUsageLimit = dto.freeUsageLimit;
 
-        return await this.configRepository.save(config);
+        const savedConfig = await this.configRepository.save(config);
+
+        // 配置更新后失效缓存
+        this.invalidateCache();
+
+        return savedConfig;
     }
 
     async getPluginConfig() {
