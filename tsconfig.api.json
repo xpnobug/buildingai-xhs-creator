@@ -1,0 +1,12 @@
+{
+    "extends": "@buildingai/typescript-config/nestjs.extension.json",
+    "compilerOptions": {
+        "outDir": "./build",
+        "rootDir": "./src/api",
+        "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.api.tsbuildinfo",
+        "resolveJsonModule": true,
+    },
+    "include": [
+        "src/api/**/*"
+    ]
+}
