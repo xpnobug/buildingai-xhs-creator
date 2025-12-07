@@ -373,7 +373,7 @@ const handleInspirationClick = (t: string) => {
 
         <div
             v-if="errorMessage"
-            class="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full bg-destructive px-4 py-2 text-sm text-white shadow-lg"
+            class="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-2xl bg-gradient-to-r from-[#ff2442] to-[#ff6b81] px-5 py-3 text-sm font-medium text-white shadow-xl"
         >
             <UIcon name="i-lucide-alert-circle" class="h-4 w-4" />
             {{ errorMessage }}
