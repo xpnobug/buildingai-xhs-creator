@@ -94,6 +94,22 @@ export class XhsImage {
     })
     billingAccountNo: string;
 
+    // 生成耗时（毫秒）
+    @Column({
+        type: "int",
+        nullable: true,
+        comment: "生成耗时（毫秒）",
+    })
+    generationDuration: number;
+
+    // 生成完成时间
+    @Column({
+        type: "timestamp",
+        nullable: true,
+        comment: "生成完成时间",
+    })
+    generatedAt: Date;
+
     @CreateDateColumn()
     createdAt: Date;
 }

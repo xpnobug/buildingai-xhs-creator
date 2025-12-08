@@ -129,6 +129,22 @@ export class XhsCreatorInitialSeeder extends BaseSeeder {
             await queryRunner.query(
                 `COMMENT ON TABLE "buildingai_xhs_creator"."xhs_creator_images" IS '小红书图片生成记录'`,
             );
+
+            // 添加生成耗时统计字段（如果表已存在）
+            await queryRunner.query(
+                `ALTER TABLE "buildingai_xhs_creator"."xhs_creator_images"
+                 ADD COLUMN IF NOT EXISTS "generation_duration" integer`,
+            );
+            await queryRunner.query(
+                `COMMENT ON COLUMN "buildingai_xhs_creator"."xhs_creator_images"."generation_duration" IS '生成耗时（毫秒）'`,
+            );
+            await queryRunner.query(
+                `ALTER TABLE "buildingai_xhs_creator"."xhs_creator_images"
+                 ADD COLUMN IF NOT EXISTS "generated_at" TIMESTAMP WITH TIME ZONE`,
+            );
+            await queryRunner.query(
+                `COMMENT ON COLUMN "buildingai_xhs_creator"."xhs_creator_images"."generated_at" IS '生成完成时间'`,
+            );
             this.logSuccess("创建 xhs_creator_images 表成功");
 
             // 创建 xhs_creator_image_history 表

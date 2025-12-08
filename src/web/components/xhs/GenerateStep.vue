@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref, watch, onMounted } from "vue";
 
 import AlertDialog from "../common/AlertDialog.vue";
 import RegenerateOptionsDialog from "./RegenerateOptionsDialog.vue";
 import { useXhsCreatorStore } from "~/stores/xhs-creator";
+import { taskApi } from "~/services/xhs/api";
 
 const props = defineProps<{
     active?: boolean;
@@ -24,6 +25,12 @@ const errorDialogMessage = ref("");
 
 // 重新生成选项弹窗状态
 const showRegenerateOptions = ref(false);
+
+// 时间预估状态
+const estimatedTime = ref("");
+const generationStartTime = ref<number | null>(null);
+const elapsedSeconds = ref(0);
+let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
 // 计算总积分需求
 const totalPowerRequired = computed(() => store.totalPagesPower);
@@ -54,10 +61,38 @@ const statusText = (status?: string) => {
     return map[status || "pending"] || "等待中";
 };
 
+// 格式化时间显示
+const formatTime = (seconds: number): string => {
+    if (seconds < 60) return `${seconds} 秒`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return secs > 0 ? `${mins} 分 ${secs} 秒` : `${mins} 分钟`;
+};
+
+// 动态剩余时间计算
+const remainingTime = computed(() => {
+    if (!isGenerating.value || !generationStartTime.value) return estimatedTime.value;
+    const progress = store.generationProgress;
+    if (!progress.total || progress.current === 0) return estimatedTime.value;
+    
+    const elapsed = elapsedSeconds.value;
+    const progressRatio = progress.current / progress.total;
+    const estimatedTotal = elapsed / progressRatio;
+    const remaining = Math.max(0, Math.round(estimatedTotal - elapsed));
+    return formatTime(remaining);
+});
+
 const startGeneration = async () => {
     if (!store.pages.length || isGenerating.value) return;
     isGenerating.value = true;
     hasStartedGeneration.value = true;
+    
+    // 启动计时器
+    generationStartTime.value = Date.now();
+    elapsedSeconds.value = 0;
+    elapsedTimer = setInterval(() => {
+        elapsedSeconds.value = Math.round((Date.now() - (generationStartTime.value || Date.now())) / 1000);
+    }, 1000);
 
     try {
         await store.generateImages();
@@ -71,6 +106,11 @@ const startGeneration = async () => {
         showErrorDialog.value = true;
     } finally {
         isGenerating.value = false;
+        // 清除计时器
+        if (elapsedTimer) {
+            clearInterval(elapsedTimer);
+            elapsedTimer = null;
+        }
     }
 };
 
@@ -221,6 +261,22 @@ watch(allCompleted, (val) => {
     }
 });
 
+// 组件挂载时获取时间预估
+onMounted(async () => {
+    try {
+        const coverCount = store.pages.filter(p => p.type === "cover").length;
+        const contentCount = store.pages.filter(p => p.type !== "cover").length;
+        const result = await taskApi.getEstimation(coverCount || 1, contentCount || 5);
+        if (result.success && result.formattedTime) {
+            estimatedTime.value = result.formattedTime;
+        }
+    } catch (error) {
+        console.error("获取时间预估失败:", error);
+        // 使用默认值
+        estimatedTime.value = "约 2 分钟";
+    }
+});
+
 const goBack = () => {
     if (isGenerating.value) return;
     emit("back");
@@ -258,6 +314,12 @@ const goBack = () => {
                     class="h-full rounded-full bg-primary transition-all"
                     :style="{ width: `${progressPercent}%` }"
                 ></div>
+            </div>
+            
+            <!-- 时间预估显示 -->
+            <div v-if="remainingTime" class="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                <UIcon name="i-lucide-clock" class="h-4 w-4 text-primary/70" />
+                <span>预计剩余时间：{{ remainingTime }}</span>
             </div>
 
             <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

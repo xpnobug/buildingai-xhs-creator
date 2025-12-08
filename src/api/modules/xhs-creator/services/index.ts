@@ -5,3 +5,4 @@ export { BillingService } from "./billing.service";
 export { ImageVersionService } from "./image-version.service";
 export { GeneratorResolverService } from "./generator-resolver.service";
 export { ImagePromptService } from "./image-prompt.service";
+export { EstimationService } from "./estimation.service";

@@ -181,13 +181,24 @@ const handleStartGeneration = async () => {
             return;
         }
         
-        // 余额充足，直接开始生成（不跳转页面）
-        // 首次生成不是重绘
-        await startGeneration(false);
+        // 余额充足，先重置页面状态
+        store.pages.forEach((page) => {
+            page.status = "pending";
+            page.imageUrl = undefined;
+            page.errorMessage = undefined;
+        });
+        
+        // 切换到生成图片 tab（由父组件处理）
+        emit("start-generate");
     } catch (error) {
         console.error("检查余额失败:", error);
-        // 如果接口失败，仍然允许继续
-        await startGeneration(false);
+        // 如果接口失败，仍然允许继续，切换到生成 tab
+        store.pages.forEach((page) => {
+            page.status = "pending";
+            page.imageUrl = undefined;
+            page.errorMessage = undefined;
+        });
+        emit("start-generate");
     } finally {
         isCheckingBalance.value = false;
     }

@@ -7,6 +7,7 @@ import axios from "axios";
 import type { Request, Response } from "express";
 import { XhsTask } from "../../../db/entities/xhs-task.entity";
 import { XhsImage } from "../../../db/entities/xhs-image.entity";
+import { EstimationService } from "../services/estimation.service";
 
 /**
  * 任务管理控制器
@@ -18,6 +19,7 @@ export class TaskController {
         private taskRepository: Repository<XhsTask>,
         @InjectRepository(XhsImage)
         private imageRepository: Repository<XhsImage>,
+        private readonly estimationService: EstimationService,
     ) {}
 
     /**
@@ -58,6 +60,33 @@ export class TaskController {
                 total,
                 totalPages: Math.ceil(total / pageSizeNum),
             },
+        };
+    }
+
+    /**
+     * 预估图片生成时间
+     * @param coverCount 封面数量
+     * @param contentCount 内容页数量
+     */
+    @Get("estimate")
+    async getEstimation(
+        @Query("coverCount") coverCount?: string,
+        @Query("contentCount") contentCount?: string,
+    ): Promise<{
+        success: boolean;
+        totalEstimatedMs: number;
+        formattedTime: string;
+        breakdown: { type: string; count: number; avgMs: number; totalMs: number }[];
+        isDefaultValue: boolean;
+    }> {
+        const cover = coverCount ? parseInt(coverCount, 10) : 1;
+        const content = contentCount ? parseInt(contentCount, 10) : 5;
+
+        const estimation = await this.estimationService.estimateTaskTime(cover, content);
+
+        return {
+            success: true,
+            ...estimation,
         };
     }
 

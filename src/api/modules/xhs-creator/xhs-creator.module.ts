@@ -26,6 +26,7 @@ import {
     GeneratorResolverService,
 } from "./services";
 import { BillingService } from "./services/billing.service";
+import { EstimationService } from "./services/estimation.service";
 
 /**
  * 小红书图文生成模块
@@ -51,6 +52,7 @@ import { BillingService } from "./services/billing.service";
         BillingService,
         ImageVersionService,
         GeneratorResolverService,
+        EstimationService,
     ],
     exports: [
         OutlineService,
@@ -60,6 +62,7 @@ import { BillingService } from "./services/billing.service";
         BillingService,
         ImageVersionService,
         GeneratorResolverService,
+        EstimationService,
     ],
 })
 export class XhsCreatorModule {}

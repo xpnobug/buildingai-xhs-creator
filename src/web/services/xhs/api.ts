@@ -287,6 +287,19 @@ export const taskApi = {
     },
 
     /**
+     * 获取生成时间预估
+     */
+    async getEstimation(coverCount: number, contentCount: number) {
+        return await usePluginWebGet<{
+            success: boolean;
+            totalEstimatedMs: number;
+            formattedTime: string;
+            breakdown: { type: string; count: number; avgMs: number; totalMs: number }[];
+            isDefaultValue: boolean;
+        }>(`/tasks/estimate?coverCount=${coverCount}&contentCount=${contentCount}`);
+    },
+
+    /**
      * 获取任务的所有图片
      */
     async getTaskImages(id: string) {

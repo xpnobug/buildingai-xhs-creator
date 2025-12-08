@@ -476,6 +476,9 @@ export class ImageService {
         const nextVersion = isRegenerate || currentVer > 1 ? currentVer + 1 : 1;
         const generatedBy = isRegenerate ? "batch-regenerate" : "initial";
         
+        // 记录开始时间（用于计算生成耗时）
+        const startTime = Date.now();
+        
         const { result: imageUrl, powerAmount } = await this.billingService.executeWithBilling(
             {
                 userId: task.userId,
@@ -489,10 +492,15 @@ export class ImageService {
                     quality: "standard",
                 });
 
-                // 生成成功：更新记录
+                // 计算生成耗时
+                const duration = Date.now() - startTime;
+
+                // 生成成功：更新记录（包含耗时统计）
                 imageRecord.imageUrl = url;
                 imageRecord.status = ImageStatus.COMPLETED;
                 imageRecord.currentVersion = nextVersion;
+                imageRecord.generationDuration = duration;
+                imageRecord.generatedAt = new Date();
                 if (isRegenerate) {
                     imageRecord.retryCount++;
                 }
@@ -512,7 +520,7 @@ export class ImageService {
             powerAmount,
         });
 
-        this.logger.debug(`图片 ${imageRecord.id} 生成成功，版本: v${nextVersion}，模式: ${generatedBy}`);
+        this.logger.debug(`图片 ${imageRecord.id} 生成成功，版本: v${nextVersion}，模式: ${generatedBy}，耗时: ${imageRecord.generationDuration}ms`);
 
         return imageUrl;
     }
