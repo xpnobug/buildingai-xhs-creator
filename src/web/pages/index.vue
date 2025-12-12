@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import "vue-waterfall-plugin-next/dist/style.css";
+
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { Waterfall } from "vue-waterfall-plugin-next";
 
 import { apiUploadFiles } from "@buildingai/service/common";
 import { useUserStore } from "@buildingai/stores/user";
@@ -29,7 +32,65 @@ const errorMessage = ref("");
 const composerRef = ref<InstanceType<typeof ComposerInput> | null>(null);
 const selectedImages = ref<File[]>([]);
 const activeTab = ref<StepKey>("compose");
-const recentTasks = ref<XhsTask[]>([]);
+
+// 项目列表（瀑布流）
+const tasks = ref<XhsTask[]>([]);
+const waterfallRef = ref();
+const loadMoreTrigger = ref<HTMLElement>();
+const isLoadingTasks = ref(false);
+const isLoadingMore = ref(false);
+const hasMore = ref(true);
+const currentPage = ref(1);
+const pageSize = ref(12);
+let loadMoreObserver: IntersectionObserver | null = null;
+
+// 瀑布流配置
+const WATERFALL_CONFIG = {
+    BREAKPOINTS: {
+        1400: { rowPerView: 4 },
+        1200: { rowPerView: 3 },
+        900: { rowPerView: 2 },
+        600: { rowPerView: 2 },
+    },
+    GUTTER: 16,
+    ANIMATION_DURATION: 300,
+    DEFAULT_ROW_PER_VIEW: 5,
+} as const;
+
+// 占位图 URL（使用简单的 SVG data URL）
+const PLACEHOLDER_IMAGE = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300"%3E%3Crect fill="%23f3f4f6" width="400" height="300"/%3E%3Cpath d="M180 120h40v60h-40z M160 180h80v20H160z" fill="%23d1d5db"/%3E%3Ccircle cx="200" cy="140" r="25" fill="%23d1d5db"/%3E%3C/svg%3E';
+
+// 记录加载失败的图片
+const failedImages = ref<Set<string>>(new Set());
+
+// 图片加载失败处理
+const handleImageError = (taskId: string, event: Event) => {
+    failedImages.value.add(taskId);
+    const img = event.target as HTMLImageElement;
+    if (img) {
+        img.style.display = 'none';
+    }
+};
+
+// 检查图片是否失败
+const isImageFailed = (taskId: string) => failedImages.value.has(taskId);
+
+// 瀑布流数据（按更新时间倒序排列）
+const waterfallData = computed(() => {
+    // 先按更新时间排序（最新的在前面）
+    const sortedTasks = [...tasks.value].sort((a, b) => {
+        const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+        const timeB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+        return timeB - timeA; // 倒序，最新的在前
+    });
+    
+    return sortedTasks.map((task) => ({
+        id: task.id,
+        task,
+        // 使用占位图确保瀑布流能正确计算高度
+        src: task.coverImageUrl || PLACEHOLDER_IMAGE,
+    }));
+});
 
 // 预览弹窗
 const isPreviewModalOpen = ref(false);
@@ -181,6 +242,10 @@ const handleResultRestart = () => {
 const handleEditTask = async (taskId: string) => {
     try {
         await store.loadTask(taskId);
+        // 保存 taskId 到 sessionStorage 以便页面刷新后恢复
+        if (typeof window !== "undefined") {
+            sessionStorage.setItem("xhs-creator-current-taskId", taskId);
+        }
         navigateTo("/xhs/outline");
     } catch (error) {
         console.error("跳转编辑大纲失败:", error);
@@ -188,17 +253,125 @@ const handleEditTask = async (taskId: string) => {
     }
 };
 
-const loadRecentTasks = async () => {
+// 加载项目列表（支持分页）
+const loadTasks = async (reset = false) => {
+    if (reset) {
+        currentPage.value = 1;
+        hasMore.value = true;
+        tasks.value = [];
+    }
+
+    if (!hasMore.value) return;
+    if (isLoadingTasks.value || isLoadingMore.value) return;
+
     try {
-        const response = await taskApi.getTasks(1, 3);
-        recentTasks.value = response.tasks || [];
+        if (currentPage.value === 1) {
+            isLoadingTasks.value = true;
+        } else {
+            isLoadingMore.value = true;
+        }
+
+        const response = await taskApi.getTasks(currentPage.value, pageSize.value);
+        const newTasks = response.tasks || [];
+
+        if (reset) {
+            tasks.value = newTasks;
+        } else {
+            tasks.value.push(...newTasks);
+        }
+
+        // 更新分页信息
+        if (response.pagination) {
+            hasMore.value = currentPage.value < response.pagination.totalPages;
+        } else {
+            hasMore.value = newTasks.length === pageSize.value;
+        }
+        currentPage.value++;
+
+        // 重新渲染瀑布流
+        await nextTick();
+        setTimeout(() => {
+            refreshWaterfall();
+        }, 100);
+
+        // 设置观察器
+        if (currentPage.value === 2) {
+            setTimeout(() => {
+                setupLoadMoreObserver();
+            }, 500);
+        }
     } catch (error) {
-        console.error("Failed to load recent tasks:", error);
+        console.error("加载项目列表失败:", error);
+    } finally {
+        isLoadingTasks.value = false;
+        isLoadingMore.value = false;
     }
 };
 
+// 强制重新渲染瀑布流
+const refreshWaterfall = () => {
+    if (waterfallRef.value?.renderer) {
+        waterfallRef.value.renderer();
+        setTimeout(() => {
+            if (waterfallRef.value?.renderer) {
+                waterfallRef.value.renderer();
+            }
+        }, 100);
+    }
+};
+
+// 设置触底加载观察器
+const setupLoadMoreObserver = () => {
+    if (loadMoreObserver) {
+        loadMoreObserver.disconnect();
+    }
+
+    if (!loadMoreTrigger.value || !hasMore.value) {
+        return;
+    }
+
+    setTimeout(() => {
+        if (!loadMoreTrigger.value || !hasMore.value) {
+            return;
+        }
+
+        loadMoreObserver = new IntersectionObserver(
+            (entries) => {
+                const entry = entries[0];
+                if (
+                    entry?.isIntersecting &&
+                    hasMore.value &&
+                    !isLoadingMore.value &&
+                    !isLoadingTasks.value
+                ) {
+                    loadTasks();
+                }
+            },
+            {
+                root: null,
+                rootMargin: "100px",
+                threshold: 0.1,
+            },
+        );
+
+        loadMoreObserver.observe(loadMoreTrigger.value);
+    }, 500);
+};
+
+// 清理观察器
+const cleanupLoadMoreObserver = () => {
+    if (loadMoreObserver) {
+        loadMoreObserver.disconnect();
+        loadMoreObserver = null;
+    }
+};
+
+onBeforeUnmount(() => {
+    cleanupLoadMoreObserver();
+});
+
 onMounted(async () => {
-    loadRecentTasks();
+    loadTasks();
     try {
         const [config, usageResult] = await Promise.all([
             apiGetXhsPluginConfig(),
@@ -312,6 +485,15 @@ const getRelativeTime = (dateStr: string) => {
 .fade-leave-to {
     opacity: 0;
 }
+
+/* 移除瀑布流组件的白色背景 */
+:deep(.waterfall-item) {
+    background: transparent !important;
+}
+
+:deep(.vue-waterfall-easy) {
+    background: transparent !important;
+}
 </style>
 
 <template>
@@ -397,76 +579,119 @@ const getRelativeTime = (dateStr: string) => {
                                 </div>
                             </div>
 
-                             <!-- Recent Projects Section -->
-                            <div v-if="recentTasks.length > 0" class="w-full space-y-4">
-                                <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400">最近项目</h3>
-                                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                                    <!-- New Project Card -->
-                                    <div class="group flex flex-col gap-2 cursor-pointer" @click="handleNewProject">
-                                        <div class="relative aspect-[4/3] w-full overflow-hidden rounded-xl border border-gray-200 dark:border-white/10 bg-gray-100 dark:bg-white/5 transition-all group-hover:border-primary/50 group-hover:bg-gray-200 dark:group-hover:bg-white/10 flex items-center justify-center">
-                                            <div class="w-10 h-10 flex items-center justify-center transition-transform group-hover:scale-110">
-                                                <UIcon name="i-lucide-plus" class="w-6 h-6 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-white" />
-                                            </div>
-                                        </div>
-                                        <span class="text-xs font-medium text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-white transition-colors">新建项目</span>
-                                    </div>
-
-                                    <!-- Recent Task Cards -->
-                                    <div
-                                        v-for="task in recentTasks"
-                                        :key="task.id"
-                                        class="group flex flex-col gap-2"
+                             <!-- 我的项目（瀑布流） -->
+                            <div v-if="tasks.length > 0 || isLoadingTasks" class="w-full space-y-4">
+                                <div class="flex items-center justify-between">
+                                    <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400">我的项目</h3>
+                                    <button 
+                                        @click="handleNewProject"
+                                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
                                     >
-                                        <!-- Cover Image Container -->
-                                        <div class="relative aspect-[4/3] w-full overflow-hidden rounded-xl border border-gray-200 dark:border-white/10 bg-gray-100 dark:bg-black/20 transition-all group-hover:border-primary/50 group-hover:shadow-lg group-hover:shadow-primary/10">
-                                            <!-- Image -->
-                                            <img
-                                                v-if="task.coverImageUrl"
-                                                :src="task.coverImageUrl"
-                                                class="h-full w-full object-cover opacity-90 dark:opacity-80 transition-opacity group-hover:opacity-100"
-                                            />
-                                            <div v-else class="h-full w-full bg-gradient-to-br from-gray-200 dark:from-white/5 to-gray-100 dark:to-white/0 flex items-center justify-center">
-                                                <UIcon name="i-lucide-image" class="w-8 h-8 text-gray-400 dark:text-gray-600" />
-                                            </div>
+                                        <UIcon name="i-lucide-plus" class="w-3.5 h-3.5" />
+                                        新建项目
+                                    </button>
+                                </div>
+                                
+                                <!-- 瀑布流 -->
+                                <Waterfall
+                                    v-if="waterfallData.length > 0"
+                                    ref="waterfallRef"
+                                    :list="waterfallData"
+                                    row-key="id"
+                                    img-selector="src"
+                                    :gutter="WATERFALL_CONFIG.GUTTER"
+                                    :has-around-gutter="false"
+                                    :animation-duration="WATERFALL_CONFIG.ANIMATION_DURATION"
+                                    :breakpoints="WATERFALL_CONFIG.BREAKPOINTS"
+                                    :row-per-view="WATERFALL_CONFIG.DEFAULT_ROW_PER_VIEW"
+                                    align="left"
+                                    cross-origin
+                                    background-color="transparent"
+                                >
+                                    <template #item="{ item }">
+                                        <div class="group flex flex-col gap-2 pb-4">
+                                            <!-- Cover Image Container -->
+                                            <div class="relative w-full overflow-hidden rounded-xl border border-gray-200 dark:border-white/10 bg-gray-100 dark:bg-black/20 transition-all group-hover:border-primary/50 group-hover:shadow-lg group-hover:shadow-primary/10">
+                                                <!-- Image with error handling -->
+                                                <img
+                                                    v-if="item.task.coverImageUrl && !isImageFailed(item.task.id)"
+                                                    :src="item.task.coverImageUrl"
+                                                    class="w-full object-cover opacity-90 dark:opacity-80 transition-opacity group-hover:opacity-100"
+                                                    @error="handleImageError(item.task.id, $event)"
+                                                />
+                                                <!-- Placeholder for missing/failed images -->
+                                                <div 
+                                                    v-if="!item.task.coverImageUrl || isImageFailed(item.task.id)" 
+                                                    class="aspect-[4/3] w-full bg-gradient-to-br from-gray-100 dark:from-gray-800 to-gray-50 dark:to-gray-900 flex flex-col items-center justify-center gap-2"
+                                                >
+                                                    <UIcon name="i-lucide-image" class="w-10 h-10 text-gray-300 dark:text-gray-600" />
+                                                    <span class="text-xs text-gray-400 dark:text-gray-500">暂无封面</span>
+                                                </div>
 
-                                            <!-- Status Badge (inside image) -->
-                                            <div v-if="task.status === 'generating_images'" class="absolute top-2 right-2">
-                                                <span class="px-2 py-0.5 rounded-full bg-primary/90 text-white text-[10px] shadow-sm backdrop-blur-sm">生成中</span>
-                                            </div>
+                                                <!-- Status Badge (inside image) -->
+                                                <div v-if="item.task.status === 'generating_images'" class="absolute top-2 right-2">
+                                                    <span class="px-2 py-0.5 rounded-full bg-primary/90 text-white text-[10px] shadow-sm backdrop-blur-sm">生成中</span>
+                                                </div>
 
-                                            <!-- Hover Overlay with Actions -->
-                                            <div class="absolute inset-0 flex items-center justify-center bg-black/0 backdrop-blur-[2px] opacity-0 transition-all duration-300 group-hover:bg-black/25 group-hover:opacity-100">
-                                                <div class="flex flex-col items-center gap-3">
-                                                    <!-- 预览按钮（白色描边） -->
-                                                    <button
-                                                        class="rounded-full border border-white/80 bg-white/10 px-6 py-1.5 text-sm font-medium text-white"
-                                                        @click.stop="openPreviewModal(task.id)"
-                                                    >
-                                                        预览
-                                                    </button>
-                                                    <!-- 编辑按钮（红色实心） -->
-                                                    <button
-                                                        class="rounded-full bg-[#ff2442] px-7 py-1.5 text-sm font-medium text-white shadow-md"
-                                                        @click.stop="handleEditTask(task.id)"
-                                                    >
-                                                        编辑
-                                                    </button>
+                                                <!-- Hover Overlay with Actions -->
+                                                <div class="absolute inset-0 flex items-center justify-center bg-black/0 backdrop-blur-[2px] opacity-0 transition-all duration-300 group-hover:bg-black/25 group-hover:opacity-100">
+                                                    <div class="flex flex-col items-center gap-3">
+                                                        <!-- 预览按钮（白色描边） -->
+                                                        <button
+                                                            class="rounded-full border border-white/80 bg-white/10 px-6 py-1.5 text-sm font-medium text-white"
+                                                            @click.stop="openPreviewModal(item.task.id)"
+                                                        >
+                                                            预览
+                                                        </button>
+                                                        <!-- 编辑按钮（红色实心） -->
+                                                        <button
+                                                            class="rounded-full bg-[#ff2442] px-7 py-1.5 text-sm font-medium text-white shadow-md"
+                                                            @click.stop="handleEditTask(item.task.id)"
+                                                        >
+                                                            编辑
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
 
-                                        <!-- Text Info (Outside) -->
-                                        <div class="flex flex-col gap-0.5">
-                                            <h4 class="text-xs font-medium text-gray-700 dark:text-gray-300 line-clamp-1 group-hover:text-primary transition-colors">
-                                                {{ task.topic || '未命名项目' }}
-                                            </h4>
-                                            <p class="text-[10px] text-gray-400 dark:text-gray-500">
-                                                {{ getRelativeTime(task.updatedAt) }}
-                                            </p>
+                                            <!-- Text Info (Outside) -->
+                                            <div class="flex flex-col gap-0.5 px-1">
+                                                <h4 class="text-xs font-medium text-gray-700 dark:text-gray-300 line-clamp-1 group-hover:text-primary transition-colors">
+                                                    {{ item.task.topic || '未命名项目' }}
+                                                </h4>
+                                                <p class="text-[10px] text-gray-400 dark:text-gray-500">
+                                                    {{ getRelativeTime(item.task.updatedAt) }}
+                                                </p>
+                                            </div>
                                         </div>
-                                    </div>
+                                    </template>
+                                </Waterfall>
+
+                                <!-- 加载更多触发器 -->
+                                <div
+                                    ref="loadMoreTrigger"
+                                    v-if="hasMore && !isLoadingTasks"
+                                    class="flex items-center justify-center py-4"
+                                >
+                                    <span v-if="isLoadingMore" class="text-xs text-gray-400 flex items-center gap-2">
+                                        <span class="w-4 h-4 border-2 border-gray-300 border-t-primary rounded-full animate-spin" />
+                                        加载更多...
+                                    </span>
+                                </div>
+
+                                <!-- 没有更多 -->
+                                <div v-if="!hasMore && tasks.length > 0" class="flex items-center justify-center py-4">
+                                    <span class="text-xs text-gray-400">没有更多了</span>
                                 </div>
                             </div>
+                            
+                            <!-- 空状态 -->
+                            <!-- <div v-else-if="!isLoadingTasks" class="w-full py-12 flex flex-col items-center gap-4">
+                                <div class="w-16 h-16 rounded-full bg-gray-100 dark:bg-white/5 flex items-center justify-center">
+                                    <UIcon name="i-lucide-image" class="w-8 h-8 text-gray-400 dark:text-gray-600" />
+                                </div>
+                                <p class="text-sm text-gray-500 dark:text-gray-400">还没有项目，开始创建你的第一个吧</p>
+                            </div> -->
                          </div>
                     </div>
 

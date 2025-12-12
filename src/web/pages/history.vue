@@ -4,6 +4,7 @@ import "vue-waterfall-plugin-next/dist/style.css";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { Waterfall } from "vue-waterfall-plugin-next";
 
+import PageHeader from "~/components/common/PageHeader.vue";
 import TaskDetailModal from "~/components/xhs/TaskDetailModal.vue";
 import type { XhsTask } from "~/models";
 import { taskApi } from "~/services/xhs/api";
@@ -192,6 +193,10 @@ const handleEditTask = async (taskId: string) => {
     try {
         // 将历史任务加载到生成流程的 store 中
         await store.loadTask(taskId);
+        // 保存 taskId 到 sessionStorage 以便页面刷新后恢复
+        if (typeof window !== "undefined") {
+            sessionStorage.setItem("xhs-creator-current-taskId", taskId);
+        }
         // 跳转到编辑大纲页面
         navigateTo("/xhs/outline");
     } catch (error) {
@@ -263,8 +268,15 @@ onBeforeUnmount(() => {
 
         <main
             v-if="!isLoading"
-            class="mx-auto w-full px-2 pb-6 pt-4 md:px-4 lg:px-6"
+            class="mx-auto w-full max-w-7xl px-4 pb-6 pt-4 md:px-6 lg:px-8"
         >
+            <!-- 统一的页面头部 -->
+            <PageHeader 
+                title="历史记录" 
+                back-text="返回首页"
+                @back="() => navigateTo('/')"
+            />
+            
             <!-- 瀑布流容器 -->
             <div class="waterfall-container mx-auto w-full">
                 <!-- 瀑布流组件 -->

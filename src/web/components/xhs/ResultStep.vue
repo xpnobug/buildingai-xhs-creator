@@ -179,7 +179,7 @@ const viewImage = (url?: string, pageIndex?: number) => {
             </div>
         </header>
 
-        <section class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <section class="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
             <div v-if="store.pages.length === 0" class="col-span-full flex flex-col items-center justify-center py-12 text-muted-foreground">
                 <UIcon name="i-lucide-image-off" class="mb-2 h-10 w-10 opacity-50" />
                 <p>暂无生成结果</p>

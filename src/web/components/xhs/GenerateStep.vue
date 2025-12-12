@@ -329,19 +329,48 @@ const goBack = () => {
                     class="flex h-full flex-col rounded-2xl border border-border/60 bg-background/70 shadow-sm"
                 >
                     <div
-                        class="relative flex flex-1 items-center justify-center overflow-hidden rounded-t-2xl bg-muted"
+                        class="relative flex flex-1 items-center justify-center overflow-hidden rounded-t-2xl bg-muted min-h-[200px]"
                     >
+                        <!-- 已完成：显示实际图片 -->
                         <img
                             v-if="page.status === 'completed' && page.imageUrl"
                             :src="page.imageUrl"
                             :alt="`第 ${page.index + 1} 页`"
                             class="h-full w-full object-cover"
                         />
-                        <div v-else-if="page.status === 'failed'" class="text-destructive">
+                        <!-- 失败：显示错误图标 -->
+                        <div v-else-if="page.status === 'failed'" class="flex flex-col items-center gap-2 text-destructive">
                             <UIcon name="i-lucide-alert-triangle" class="h-8 w-8" />
+                            <span class="text-xs">生成失败</span>
                         </div>
-                        <div v-else class="text-primary">
-                            <UIcon name="i-lucide-loader-2" class="h-8 w-8 animate-spin" />
+                        <!-- 等待中/生成中：显示骨架屏效果 -->
+                        <div v-else class="absolute inset-0 skeleton-shimmer">
+                            <div class="absolute inset-0 flex flex-col items-center justify-center gap-3">
+                                <!-- 状态图标 -->
+                                <div 
+                                    class="w-12 h-12 rounded-full flex items-center justify-center"
+                                    :class="page.status === 'generating' ? 'bg-primary/20' : 'bg-muted-foreground/10'"
+                                >
+                                    <UIcon 
+                                        name="i-lucide-image" 
+                                        class="h-6 w-6"
+                                        :class="page.status === 'generating' ? 'text-primary animate-pulse' : 'text-muted-foreground/50'" 
+                                    />
+                                </div>
+                                <!-- 状态文字 -->
+                                <span 
+                                    class="text-xs font-medium"
+                                    :class="page.status === 'generating' ? 'text-primary' : 'text-muted-foreground/70'"
+                                >
+                                    {{ page.status === 'generating' ? '正在生成...' : '排队等待中' }}
+                                </span>
+                                <!-- 进度指示（仅生成中显示） -->
+                                <div v-if="page.status === 'generating'" class="flex gap-1">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style="animation-delay: 0ms" />
+                                    <span class="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style="animation-delay: 150ms" />
+                                    <span class="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style="animation-delay: 300ms" />
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div
@@ -404,4 +433,27 @@ const goBack = () => {
         />
     </div>
 </template>
+
+<style scoped>
+/* 骨架屏闪烁动画 */
+.skeleton-shimmer {
+    background: linear-gradient(
+        90deg,
+        hsl(var(--muted)) 0%,
+        hsl(var(--muted) / 0.5) 50%,
+        hsl(var(--muted)) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+    0% {
+        background-position: 200% 0;
+    }
+    100% {
+        background-position: -200% 0;
+    }
+}
+</style>
 

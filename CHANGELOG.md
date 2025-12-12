@@ -4,9 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## 更新日志
 
-### v1.0.0 (2025-12-11)
+### v1.0.0 (2025-12-12)
 
-- 初始版本发布
+#### 核心功能
 - ✨ AI 驱动的大纲生成功能
 - 🎨 AI 图片生成 (SSE 流式通信)
 - 📊 图片版本历史记录与恢复
@@ -17,3 +17,21 @@ All notable changes to this project will be documented in this file.
 - 🛡️ 熔断保护防止 AI 服务雪崩
 - 💾 Redis 缓存优化性能
 
+#### 页面刷新状态持久化
+- 🔧 使用 sessionStorage 保存 taskId，支持页面刷新后恢复任务状态
+- 📄 outline.vue / generate.vue / result.vue 自动从后端恢复数据
+
+#### 统一返回按钮
+- 🔙 新增 `PageHeader.vue` 组件，提供统一的页面顶部返回按钮
+- 🎯 已集成到 outline / generate / result / history 页面
+
+#### 首页瀑布流改造
+- 🖼️ 首页"我的项目"改为瀑布流展示所有用户项目
+- 📜 支持无限滚动加载更多项目
+- 🕐 按更新时间倒序排列
+- 🖼️ 图片加载失败时显示"暂无封面"占位图
+
+#### 图片生成骨架屏
+- ⏳ 生成中显示渐变闪烁骨架屏效果
+- 🎨 区分"排队等待中"和"正在生成..."状态
+- 💫 生成中显示弹跳点动画
