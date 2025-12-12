@@ -567,7 +567,7 @@ const getRelativeTime = (dateStr: string) => {
                                     >
                                         <img 
                                             :src="template.image" 
-                                            class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110 opacity-60 group-hover:opacity-80"
+                                            class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110 opacity-90 group-hover:opacity-80"
                                         />
                                         <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-3 flex items-end">
                                             <div class="flex items-center gap-1 w-full">
